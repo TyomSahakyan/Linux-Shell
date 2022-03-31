@@ -61,6 +61,66 @@ char** split_line(char* line) {
 	return tokens;
 }
 
+void check_pipes(char** parsed, char** parsedpipe) {
+  int pipe_fd[2];
+  pid_t p1, p2;
+  if(pipe(pipe_fd) < 0) {
+    printf("PIPE COULD NOT BE INITIALIZED\n");
+    return;
+  }
+  p1 = fork();
+  if(p1 < 0) {
+    printf("COULD NOT CREATE PROCESS\n");
+    return;
+  }
+  if(p1 == 0) {
+    //First Child executing
+    close(pipe_fd[0]);
+    dup2(pipe_fd[1], STDOUT_FILENO);
+    close(pipe_fd[1]);
+    
+    if(execvp(parsed[0], parsed) < 0) {
+      printf("COULD NOT EXECUTE COMMAND\n");
+      exit(0);
+    }
+  }
+  else {
+    //Parnet executing
+    p2 = fork();
+    if(p2 < 0) {
+      printf("Could not fork");
+      return;
+    }
+    //Second child executing
+    if(p2 == 0) {
+      close(pipe_fd[1]);
+      dup2(pipe_fd[0], STDIN_FILENO);
+      close(pipe_fd[0]);
+      if(execvp(parsedpipe[0], parsedpipe) < 0) {
+        printf("COULD NOT EXECUTE COMMAND\n");
+        exit(0);
+      }
+    }
+    else {
+      //Waiting for Children
+      wait(NULL);
+      wait(NULL);
+    }
+  }
+}
+
+int find_pipe(char* str, char** strpipe) {
+  for(int i = 0; i < 2; ++i) {
+    strpipe[i] = strsep(&str, "|");
+    if(strpipe[i] == NULL)
+      break;
+  }
+  if(strpipe[1] == NULL)
+    return 0; //pipe not found
+  else
+    return 1;
+}
+
 int execute(char ** args) {
   pid_t cpid;
   if (strcmp(args[0], "exit") == 0)
@@ -89,11 +149,18 @@ int execute(char ** args) {
 void inf_loop() {
   char* line;
   char** args;
+  int pipe = 0;
   int status = 1;
 	do {
 		printf(">");
 		line = read_line();
 		args = split_line(line);
+    pipe = find_pipe(line, args);
+    if(pipe)
+    {
+      check_pipes(args, args);
+      continue;
+    }
 		status = execute(args);
     free(line);
     free(args);
